@@ -2,7 +2,8 @@
 
 **Author:** Aaron Pongsugree  
 **Tools:** R, R Markdown, survival, survminer, gtsummary, broom  
-**Dataset:** [Heart Failure Clinical Records — Kaggle](https://www.kaggle.com/datasets/andrewmvd/heart-failure-clinical-data)
+**Dataset:** [Heart Failure Clinical Records — Kaggle](https://www.kaggle.com/datasets/andrewmvd/heart-failure-clinical-data)  
+**Report:** [View Full HTML Report](https://aaronpong.github.io/Survival-Analysis-Heart-Failure/SA_Heart_Failure.html)
 
 ---
 
@@ -23,9 +24,6 @@ This project applies survival analysis techniques to clinical data from 299 hear
 ## Dataset
 
 The Heart Failure Clinical Records Dataset (Chicco & Jurman, 2020) contains 299 patients recruited at the Faisalabad Institute of Cardiology (Pakistan, 2015), with follow-up ranging from 4 to 285 days. It includes 13 clinical features such as ejection fraction, serum creatinine, age, and blood pressure status.
-
-> Data is publicly available on Kaggle — not included in this repository.  
-> Download it and place the CSV in a `data/` folder before knitting.
 
 ---
 
@@ -71,12 +69,25 @@ SA_Heart_Failure.Rmd
 
 ---
 
+## Repository Structure
+
+```
+Survival-Analysis-Heart-Failure/
+├── data/
+│   └── heart_failure_clinical_records_dataset.csv
+├── SA_Heart_Failure.Rmd
+├── SA_Heart_Failure.html
+├── README.md
+└── .gitignore
+```
+
+---
+
 ## How to Run
 
 1. Clone this repository
-2. Download the dataset from [Kaggle](https://www.kaggle.com/datasets/andrewmvd/heart-failure-clinical-data) and place it at `data/heart_failure_clinical_records_dataset.csv`
-3. Open `SA_Heart_Failure.Rmd` in RStudio
-4. Click **Knit** — missing packages will install automatically
+2. Open `SA_Heart_Failure.Rmd` in RStudio
+3. Click **Knit** — missing packages will install automatically
 
 ---
 
