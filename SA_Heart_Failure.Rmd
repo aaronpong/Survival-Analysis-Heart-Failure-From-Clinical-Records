@@ -1,0 +1,404 @@
+---
+title: "Survival Analysis: Heart Failure Clinical Records"
+author: "Aaron Pongsugree"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: flatly
+    highlight: tango
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+required_packages <- c("survival", "survminer", "tidyverse",
+                        "gtsummary", "knitr", "kableExtra", "ggplot2", "broom")
+missing_packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
+if (length(missing_packages) > 0) install.packages(missing_packages, dependencies = TRUE)
+
+knitr::opts_chunk$set(
+  echo      = FALSE,
+  warning   = FALSE,
+  message   = FALSE,
+  fig.align = "center",
+  fig.width = 8,
+  fig.height = 5
+)
+```
+
+---
+
+# 1. Introduction
+
+Heart failure is a serious cardiovascular condition affecting millions worldwide.
+This analysis applies survival analysis techniques to the
+**Heart Failure Clinical Records Dataset** (Chicco & Jurman, 2020) to identify
+clinical predictors of mortality.
+
+**Objectives:**
+
+- Estimate survival functions using Kaplan-Meier (KM) curves
+- Compare survival between clinically relevant subgroups via log-rank tests
+- Identify independent predictors of death using a Cox Proportional Hazards model
+
+---
+
+# 2. Data Overview
+
+The dataset contains **299 patients** with heart failure, recruited at the
+Faisalabad Institute of Cardiology (Pakistan, 2015). The follow-up period
+ranged from 4 to 285 days.
+
+| Variable | Description | Type |
+|---|---|---|
+| `age` | Patient age (years) | Continuous |
+| `anaemia` | Decrease in red blood cells | Binary |
+| `creatinine_phosphokinase` | CPK enzyme level (mcg/L) | Continuous |
+| `diabetes` | Presence of diabetes | Binary |
+| `ejection_fraction` | % blood leaving heart per contraction | Continuous |
+| `high_blood_pressure` | Presence of hypertension | Binary |
+| `platelets` | Platelets in blood (kiloplatelets/mL) | Continuous |
+| `serum_creatinine` | Serum creatinine level (mg/dL) | Continuous |
+| `serum_sodium` | Serum sodium level (mEq/L) | Continuous |
+| `sex` | Patient sex (1 = Male, 0 = Female) | Binary |
+| `smoking` | Smoking status | Binary |
+| `time` | Follow-up period (days) | Continuous |
+| `DEATH_EVENT` | Death during follow-up (1 = Yes) | Binary (outcome) |
+
+---
+
+# 3. Setup & Data Loading
+
+```{r libraries}
+library(survival)
+library(survminer)
+library(tidyverse)
+library(gtsummary)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+```
+
+```{r load-data}
+df <- read.csv("data/heart_failure_clinical_records_dataset.csv")
+
+# Factor binary variables for readability
+df <- df %>%
+  mutate(
+    anaemia          = factor(anaemia,          labels = c("No", "Yes")),
+    diabetes         = factor(diabetes,         labels = c("No", "Yes")),
+    high_blood_pressure = factor(high_blood_pressure, labels = c("No", "Yes")),
+    sex              = factor(sex,              labels = c("Female", "Male")),
+    smoking          = factor(smoking,          labels = c("No", "Yes")),
+    DEATH_EVENT      = as.numeric(DEATH_EVENT),
+    age_group        = cut(age, breaks = c(0, 60, 70, 100),
+                           labels = c("< 60", "60–70", "> 70"))
+  )
+
+
+```
+
+---
+
+# 4. Descriptive Statistics
+
+```{r summary-table}
+df %>%
+  select(-time, -DEATH_EVENT) %>%
+  tbl_summary(
+    by = NULL,
+    statistic = list(
+      all_continuous()  ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = all_continuous() ~ 2
+  ) %>%
+  bold_labels() %>%
+  as_kable_extra(caption = "Table 1. Patient Characteristics (N = 299)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r event-summary}
+df %>%
+  summarise(
+    `Total Patients`          = n(),
+    Deaths                    = sum(DEATH_EVENT),
+    `Death Rate (%)`          = round(mean(DEATH_EVENT) * 100, 1),
+    `Median Follow-up (days)` = median(time)
+  ) %>%
+  kable(caption = "Table 2. Event Summary") %>%
+  kable_styling(bootstrap_options = "bordered", full_width = FALSE)
+```
+
+*Note: Median survival was not reached during the study period, as fewer than
+50% of patients experienced the event (death rate = 32.1%).*
+
+---
+
+# 5. Kaplan-Meier Survival Estimates
+
+## 5.1 Overall Survival
+
+```{r km-overall}
+surv_obj <- Surv(time = df$time, event = df$DEATH_EVENT)
+
+km_overall <- survfit(surv_obj ~ 1, data = df)
+
+ggsurvplot(
+  km_overall,
+  data          = df,
+  conf.int      = TRUE,
+  risk.table    = TRUE,
+  xlab          = "Follow-up Time (Days)",
+  ylab          = "Survival Probability",
+  title         = "Figure 1. Overall Kaplan-Meier Survival Curve",
+  ggtheme       = theme_minimal(),
+  palette       = "#2E86AB",
+  surv.median.line = "hv"
+)
+```
+
+## 5.2 Survival by Ejection Fraction Group
+
+```{r km-ef}
+df <- df %>%
+  mutate(ef_group = cut(ejection_fraction,
+                        breaks = c(0, 30, 45, 100),
+                        labels = c("Low (≤30%)", "Mid (31–45%)", "High (>45%)")))
+
+km_ef <- survfit(surv_obj ~ ef_group, data = df)
+
+ggsurvplot(
+  km_ef,
+  data       = df,
+  conf.int   = FALSE,
+  risk.table = TRUE,
+  pval       = TRUE,
+  xlab       = "Follow-up Time (Days)",
+  ylab       = "Survival Probability",
+  title      = "Figure 2. Survival by Ejection Fraction Group",
+  legend.title  = "EF Group",
+  ggtheme    = theme_minimal(),
+  palette    = c("#E74C3C", "#F39C12", "#27AE60")
+)
+```
+
+## 5.3 Survival by Serum Creatinine Group
+
+```{r km-creatinine}
+df <- df %>%
+  mutate(creatinine_group = cut(serum_creatinine,
+                                breaks = c(0, 1.2, 2, Inf),
+                                labels = c("Normal (≤1.2)", "Elevated (1.2–2)", "High (>2)")))
+
+km_creat <- survfit(surv_obj ~ creatinine_group, data = df)
+
+ggsurvplot(
+  km_creat,
+  data       = df,
+  conf.int   = FALSE,
+  risk.table = TRUE,
+  pval       = TRUE,
+  xlab       = "Follow-up Time (Days)",
+  ylab       = "Survival Probability",
+  title      = "Figure 3. Survival by Serum Creatinine Group",
+  legend.title  = "Creatinine",
+  ggtheme    = theme_minimal(),
+  palette    = c("#27AE60", "#F39C12", "#E74C3C")
+)
+```
+
+## 5.4 Survival by Sex
+
+```{r km-sex}
+km_sex <- survfit(surv_obj ~ sex, data = df)
+
+ggsurvplot(
+  km_sex,
+  data       = df,
+  conf.int   = TRUE,
+  risk.table = TRUE,
+  pval       = TRUE,
+  xlab       = "Follow-up Time (Days)",
+  ylab       = "Survival Probability",
+  title      = "Figure 4. Survival by Sex",
+  legend.title  = "Sex",
+  ggtheme    = theme_minimal(),
+  palette    = c("#9B59B6", "#3498DB")
+)
+```
+
+---
+
+# 6. Log-Rank Tests
+
+```{r logrank-tests}
+comparisons <- list(
+  "Ejection Fraction Group" = survdiff(surv_obj ~ ef_group,             data = df),
+  "Serum Creatinine Group"  = survdiff(surv_obj ~ creatinine_group,     data = df),
+  "Age Group"               = survdiff(surv_obj ~ age_group,            data = df),
+  "Sex"                     = survdiff(surv_obj ~ sex,                  data = df),
+  "Anaemia"                 = survdiff(surv_obj ~ anaemia,              data = df),
+  "Diabetes"                = survdiff(surv_obj ~ diabetes,             data = df),
+  "High Blood Pressure"     = survdiff(surv_obj ~ high_blood_pressure,  data = df),
+  "Smoking"                 = survdiff(surv_obj ~ smoking,              data = df)
+)
+
+logrank_results <- tibble(
+  Variable = names(comparisons),
+  Chi_sq   = sapply(comparisons, function(x) round(x$chisq, 3)),
+  df       = sapply(comparisons, function(x) length(x$n) - 1),
+  p_value  = sapply(comparisons, function(x) round(1 - pchisq(x$chisq, length(x$n) - 1), 4))
+)
+
+logrank_sorted <- logrank_results %>%
+  arrange(p_value) %>%
+  mutate(Significant = ifelse(p_value < 0.05, "✓", ""))
+
+logrank_sorted %>%
+  kable(caption = "Table 3. Log-Rank Test Results") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
+  row_spec(which(logrank_sorted$p_value < 0.05), bold = TRUE, color = "#27AE60")
+```
+
+---
+
+# 7. Cox Proportional Hazards Model
+
+## 7.1 Univariable Cox Models
+
+```{r cox-univar}
+predictors <- c("age", "anaemia", "creatinine_phosphokinase", "diabetes",
+                "ejection_fraction", "high_blood_pressure", "platelets",
+                "serum_creatinine", "serum_sodium", "sex", "smoking")
+
+uni_results <- map_dfr(predictors, function(var) {
+  formula <- as.formula(paste("surv_obj ~", var))
+  model   <- coxph(formula, data = df)
+  s       <- summary(model)$coefficients
+  tibble(
+    Variable = var,
+    HR       = round(exp(s[1, "coef"]), 3),
+    CI_lower = round(exp(s[1, "coef"] - 1.96 * s[1, "se(coef)"]), 3),
+    CI_upper = round(exp(s[1, "coef"] + 1.96 * s[1, "se(coef)"]), 3),
+    p_value  = round(s[1, "Pr(>|z|)"], 4)
+  )
+})
+
+uni_sorted <- uni_results %>%
+  arrange(p_value) %>%
+  mutate(`95% CI` = paste0("(", CI_lower, " – ", CI_upper, ")")) %>%
+  select(Variable, HR, `95% CI`, p_value)
+
+uni_sorted %>%
+  mutate(p_value = ifelse(p_value < 0.001, "<0.001", as.character(p_value))) %>%
+  kable(caption = "Table 4. Univariable Cox Regression Results") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
+  row_spec(which(uni_sorted$p_value < 0.05), bold = TRUE)
+```
+
+## 7.2 Multivariable Cox Model
+
+Variables with p < 0.10 in univariable analysis are included.
+
+```{r cox-multi}
+cox_multi <- coxph(
+  surv_obj ~ age + ejection_fraction + serum_creatinine + 
+             serum_sodium + high_blood_pressure + anaemia,
+  data = df
+)
+```
+
+```{r cox-multi-table}
+broom::tidy(cox_multi, exponentiate = TRUE, conf.int = TRUE) %>%
+  mutate(across(where(is.numeric), ~ round(., 3))) %>%
+  mutate(`p.value` = ifelse(p.value < 0.001, "<0.001", as.character(p.value))) %>%
+  mutate(term = recode(term,
+    "high_blood_pressureYes" = "High Blood Pressure (Yes)",
+    "anaemiaYes"             = "Anaemia (Yes)",
+    "age"                    = "Age",
+    "ejection_fraction"      = "Ejection Fraction",
+    "serum_creatinine"       = "Serum Creatinine",
+    "serum_sodium"           = "Serum Sodium"
+  )) %>%
+  mutate(p.value = ifelse(p.value < 0.001, "<0.001", as.character(p.value))) %>%
+  select(term, estimate, conf.low, conf.high, p.value) %>%
+  rename(Variable = term, HR = estimate,
+         `95% CI Lower` = conf.low,
+         `95% CI Upper` = conf.high,
+         `p-value` = p.value) %>%
+  kable(caption = "Table. Multivariable Cox Model Results") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+```{r cox-forest}
+ggforest(cox_multi,
+         data     = df,
+         main     = "Figure 5. Forest Plot — Multivariable Cox Model",
+         fontsize = 0.85)
+```
+
+## 7.3 Proportional Hazards Assumption Check
+
+```{r ph-assumption, results='hide'}
+ph_test <- cox.zph(cox_multi)
+print(ph_test)
+ggcoxzph(ph_test)
+```
+
+---
+
+# 8. Key Findings
+
+```{r findings-table}
+findings <- tibble(
+  Finding = c(
+    "32.1% mortality rate over a median follow-up of 115 days; median survival not reached",
+    "Low ejection fraction (≤30%) significantly worsens survival",
+    "Elevated serum creatinine is the strongest independent predictor of mortality",
+    "Older age independently increases hazard of death",
+    "High blood pressure independently associated with increased mortality risk",
+    "Serum sodium shows a marginal inverse association with hazard (p = 0.068)"
+  ),
+  `Statistical Support` = c(
+    "96 deaths among 299 patients; KM overall curve",
+    "Log-rank p < 0.0001; HR = 0.954 per unit increase in multivariable Cox",
+    "Log-rank p < 0.0001; HR = 1.356, p < 0.001 in multivariable Cox",
+    "HR = 1.045 per year, p < 0.001 in multivariable Cox",
+    "HR = 1.606, p = 0.026 in multivariable Cox",
+    "HR = 0.958, p = 0.068; CI crosses 1.0"
+  )
+)
+
+findings %>%
+  kable(caption = "Table 5. Summary of Key Findings") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+---
+
+# 9. Conclusion
+
+This survival analysis identified **age**, **ejection fraction**, **serum creatinine**,
+and **high blood pressure** as significant independent predictors of mortality in heart
+failure patients (all p < 0.05), with serum sodium showing a borderline association
+(p = 0.068). Serum creatinine carried the largest effect size (HR = 1.36), consistent
+with Chicco & Jurman (2020). The global Schoenfeld test confirmed the proportional
+hazards assumption was met (p = 0.207), though ejection fraction showed a marginal
+individual violation (p = 0.033) warranting cautious interpretation. Overall model
+discrimination was adequate (concordance = 0.73), supporting the clinical utility
+of these variables in predicting heart failure mortality.
+
+---
+
+# 10. References
+
+- Chicco, D., & Jurman, G. (2020). Machine learning can predict survival of
+  patients with heart failure from serum creatinine and ejection fraction alone.
+  *BMC Medical Informatics and Decision Making, 20*(16).
+- Kaggle Dataset: Heart Failure Clinical Records —
+  https://www.kaggle.com/datasets/andrewmvd/heart-failure-clinical-data
+
+
+---
